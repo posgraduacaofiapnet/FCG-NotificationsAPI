@@ -1,53 +1,69 @@
 # FCG-NotificationsAPI
 
-Microservice responsible for simulating the sending of e-mails — welcome e-mails on user registration and purchase confirmation e-mails on approved payments — by logging them to the console.
+Microserviço responsável por simular o envio de e-mails — e-mail de boas-vindas no cadastro de usuário e e-mail de confirmação de compra após pagamento aprovado — registrando as notificações no console via Serilog.
 
-Part of **FIAP Cloud Games (FCG)** — Tech Challenge Phase 2.
+Parte do **FIAP Cloud Games (FCG)** — Tech Challenge Fase 2.
 
-## Tech Stack
+---
+
+## Tecnologias
 
 - .NET 10 / ASP.NET Core
 - MassTransit + RabbitMQ
 - Swagger / OpenAPI
+- Serilog (logs estruturados em JSON)
+
+---
 
 ## Endpoints
 
-| Method | Route | Description | Auth |
-|--------|-------|-------------|------|
-| `GET` | `/health` | Health check | No |
+| Método | Rota | Descrição | Auth |
+|--------|------|-----------|------|
+| `GET` | `/health` | Health check | Não |
 
-> NotificationsAPI is fully event-driven — it has no user-facing endpoints. It only reacts to events published by UsersAPI and PaymentsAPI.
+> A NotificationsAPI é totalmente orientada a eventos — não possui endpoints expostos ao usuário. Ela reage exclusivamente a eventos publicados pela UsersAPI e pela PaymentsAPI.
 
-## Events
+---
 
-| Direction | Event | Trigger |
-|-----------|-------|---------|
-| Consumes | `UserCreatedEvent` | Logs a simulated welcome e-mail |
-| Consumes | `PaymentProcessedEvent` | Logs a simulated purchase confirmation e-mail, only when `Status` is `Approved` |
+## Eventos
 
-## Event-Driven Flow
+| Direção | Evento | Comportamento |
+|---------|--------|---------------|
+| Consome | `UserCreatedEvent` | Loga um e-mail de boas-vindas simulado |
+| Consome | `PaymentProcessedEvent` | Loga e-mail de confirmação de compra apenas quando `Status` é `Approved` |
+
+---
+
+## Fluxo Event-Driven
 
 ```
-UsersAPI publishes UserCreatedEvent
-  → NotificationsAPI consumes and logs "welcome e-mail sent"
+UsersAPI publica UserCreatedEvent
+  → NotificationsAPI consome
+    → Loga: "E-mail de boas-vindas enviado para <email>"
 
-PaymentsAPI publishes PaymentProcessedEvent
-  → NotificationsAPI consumes
-    → if Approved: logs "purchase confirmation e-mail sent"
-    → if Rejected: logs the rejection, no e-mail simulated
+PaymentsAPI publica PaymentProcessedEvent
+  → NotificationsAPI consome
+    → se Approved: Loga "E-mail de confirmação de compra enviado para <email>"
+    → se Rejected: Loga a rejeição, nenhum e-mail simulado
 ```
 
-## Environment Variables
+Todos os logs incluem `CorrelationId`, permitindo rastrear toda a cadeia de eventos de uma mesma operação nos logs do cluster.
 
-| Variable | Description |
-|----------|-------------|
-| `RabbitMq__Host` | RabbitMQ hostname |
-| `RabbitMq__Username` | RabbitMQ username |
-| `RabbitMq__Password` | RabbitMQ password |
-| `RabbitMq__UserCreatedQueue` | Queue name for `UserCreatedEvent` |
-| `RabbitMq__PaymentProcessedQueue` | Queue name for `PaymentProcessedEvent` |
+---
 
-## Running Locally
+## Variáveis de Ambiente
+
+| Variável | Descrição |
+|----------|-----------|
+| `RabbitMq__Host` | Hostname do RabbitMQ |
+| `RabbitMq__Username` | Usuário do RabbitMQ |
+| `RabbitMq__Password` | Senha do RabbitMQ |
+| `RabbitMq__UserCreatedQueue` | Nome da fila para `UserCreatedEvent` |
+| `RabbitMq__PaymentProcessedQueue` | Nome da fila para `PaymentProcessedEvent` |
+
+---
+
+## Executando Localmente
 
 ### Docker Compose (via FCG-Orchestration)
 
@@ -56,47 +72,82 @@ cd FCG-Orchestration
 docker compose up --build
 ```
 
-Watch notification logs:
+Acompanhar logs de notificações:
 
 ```bash
-docker compose logs -f notifications_api
+docker compose logs -f notifications-api
 ```
 
 ### Kubernetes
 
 ```bash
-# Build the image first
+# 1. Build da imagem local
 cd FCG-NotificationsAPI
 docker build -t fcg-notifications-api:latest -f services/NotificationsAPI/Dockerfile .
 
-# Apply manifests
-cd k8s
+# 2. Aplique a infra (RabbitMQ) primeiro
+cd ../FCG-Orchestration/k8s
 kubectl apply -f .
 
-# Verify
+# 3. Aplique os manifestos da NotificationsAPI
+cd ../../FCG-NotificationsAPI/k8s
+kubectl apply -f .
+
+# 4. Verifique os pods
 kubectl get pods
+kubectl get services
+
+# 5. Acompanhe os logs (notificações aparecem aqui)
 kubectl logs -f deployment/notifications-api
 ```
 
-## Solution Structure
+#### Manifestos Kubernetes
+
+| Arquivo | Tipo | Descrição |
+|---------|------|-----------|
+| `deployment.yaml` | Deployment | Define o Pod com 1 réplica, imagem, probes e referência a ConfigMap/Secret |
+| `service.yaml` | Service | Expõe a API internamente no cluster na porta 80 |
+| `configmap.yaml` | ConfigMap | Configurações não-sensíveis (RabbitMQ host/username, nomes das filas) |
+| `secret.yaml` | Secret | Dados sensíveis em base64 (RabbitMQ password) |
+
+As **readinessProbe** e **livenessProbe** do Deployment apontam para `/health` — o pod só recebe tráfego após o healthcheck passar.
+
+---
+
+## Testes Unitários
+
+```bash
+cd FCG-NotificationsAPI
+dotnet test FCG-NotificationsAPI.sln
+```
+
+Os testes utilizam **xUnit** e **Bogus** para geração de dados fictícios.
+
+---
+
+## Estrutura da Solution
 
 ```
 FCG-NotificationsAPI/
 ├── FCG-NotificationsAPI.sln
 ├── contracts/
-│   └── FCG.Contracts/        # Shared event contracts
+│   └── FCG.Contracts/           # Contratos de eventos compartilhados
 ├── services/
-│   └── NotificationsAPI/     # Main service project
-└── k8s/                      # Kubernetes manifests
+│   └── NotificationsAPI/        # Projeto principal do serviço
+├── tests/
+│   └── NotificationsAPI.Tests/  # Testes unitários (xUnit)
+└── k8s/                         # Manifestos Kubernetes
     ├── deployment.yaml
     ├── service.yaml
     ├── configmap.yaml
     └── secret.yaml
 ```
 
-## Related Repositories
+---
 
-- [FCG-Orchestration](https://github.com/posgraduacaofiapnet/FCG-Orchestration) — Docker Compose + global K8s infra
+## Repositórios Relacionados
+
+- [FCG-Orchestration](https://github.com/posgraduacaofiapnet/FCG-Orchestration) — Docker Compose + infraestrutura K8s global
 - [FCG-UsersAPI](https://github.com/posgraduacaofiapnet/FCG-UsersAPI)
 - [FCG-CatalogAPI](https://github.com/posgraduacaofiapnet/FCG-CatalogAPI)
 - [FCG-PaymentsAPI](https://github.com/posgraduacaofiapnet/FCG-PaymentsAPI)

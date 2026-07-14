@@ -30,6 +30,7 @@ public sealed class UserCreatedConsumer(NotificationLogService notifications) : 
 {
     public Task Consume(ConsumeContext<UserCreatedEvent> context)
     {
+        using var _ = Serilog.Context.LogContext.PushProperty("CorrelationId", CorrelationId.From(context.Headers));
         notifications.SendWelcome(context.Message);
         return Task.CompletedTask;
     }
@@ -39,6 +40,7 @@ public sealed class PaymentProcessedConsumer(NotificationLogService notification
 {
     public Task Consume(ConsumeContext<PaymentProcessedEvent> context)
     {
+        using var _ = Serilog.Context.LogContext.PushProperty("CorrelationId", CorrelationId.From(context.Headers));
         notifications.SendPurchaseConfirmation(context.Message);
         return Task.CompletedTask;
     }

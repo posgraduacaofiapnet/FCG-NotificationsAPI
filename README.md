@@ -1,5 +1,16 @@
 # FCG-NotificationsAPI
 
+> **Legado da Fase 2.** Este repositório não participa da stack atual do Orchestration.
+> Na evolução das Fases 3 e 4, UsersAPI/CatalogAPI persistem notificações em outbox SQL;
+> `FCG-Outbox-Processor` publica na SQS e `FCG-Notifications-Lambda` processa as mensagens.
+> O contrato atual de pagamento não deve ser tratado como compatível automaticamente com esta
+> cópia histórica. Os fluxos abaixo descrevem a implementação antiga, não a entrega da Fase 4.
+
+Para a entrega atual, consultar a [documentação central](https://github.com/posgraduacaofiapnet/FCG-Orchestration)
+e a [matriz da Fase 4](https://github.com/posgraduacaofiapnet/FCG-Orchestration/blob/master/docs/FASE4.md).
+Não usar este serviço junto do fluxo novo para comprovar notificações sem preparar um ambiente
+legado isolado e conferir os contratos.
+
 Microserviço responsável por simular o envio de e-mails — e-mail de boas-vindas no cadastro de usuário e e-mail de confirmação de compra após pagamento aprovado — registrando as notificações no console via Serilog.
 
 Parte do **FIAP Cloud Games (FCG)** — Tech Challenge Fase 2.
@@ -21,7 +32,8 @@ Parte do **FIAP Cloud Games (FCG)** — Tech Challenge Fase 2.
 |--------|------|-----------|------|
 | `GET` | `/health` | Health check | Não |
 
-> A NotificationsAPI é totalmente orientada a eventos — não possui endpoints expostos ao usuário. Ela reage exclusivamente a eventos publicados pela UsersAPI e pela PaymentsAPI.
+> A NotificationsAPI histórica é orientada a eventos e possui somente endpoint de saúde.
+> A UsersAPI atual não publica `UserCreatedEvent` diretamente no RabbitMQ.
 
 ---
 
@@ -65,20 +77,17 @@ Todos os logs incluem `CorrelationId`, permitindo rastrear toda a cadeia de even
 
 ## Executando Localmente
 
-### Docker Compose (via FCG-Orchestration)
+### Stack atual
 
-```bash
-cd FCG-Orchestration
-docker compose up --build
-```
-
-Acompanhar logs de notificações:
-
-```bash
-docker compose logs -f notifications-api
-```
+O Compose atual do `FCG-Orchestration` não define `notifications-api`; portanto não há
+comando `docker compose logs notifications-api` nesse ambiente. Para executar o fluxo novo,
+seguir o README do Orchestration com os repositórios do worker e da Lambda presentes.
 
 ### Kubernetes
+
+Somente para inspeção ou ambiente legado isolado. O procedimento abaixo não é implantação da
+Fase 4 nem garante compatibilidade com os publicadores atuais. A infraestrutura compartilhada
+usa Kustomize, e a imagem local deve estar acessível ao cluster com o nome usado pelo Deployment.
 
 ```bash
 # 1. Build da imagem local
@@ -86,11 +95,11 @@ cd FCG-NotificationsAPI
 docker build -t fcg-notifications-api:latest -f services/NotificationsAPI/Dockerfile .
 
 # 2. Aplique a infra (RabbitMQ) primeiro
-cd ../FCG-Orchestration/k8s
-kubectl apply -f .
+cd ../FCG-Orchestration
+kubectl apply -k k8s
 
 # 3. Aplique os manifestos da NotificationsAPI
-cd ../../FCG-NotificationsAPI/k8s
+cd ../FCG-NotificationsAPI/k8s
 kubectl apply -f .
 
 # 4. Verifique os pods
@@ -108,7 +117,7 @@ kubectl logs -f deployment/notifications-api
 | `deployment.yaml` | Deployment | Define o Pod com 1 réplica, imagem, probes e referência a ConfigMap/Secret |
 | `service.yaml` | Service | Expõe a API internamente no cluster na porta 80 |
 | `configmap.yaml` | ConfigMap | Configurações não-sensíveis (RabbitMQ host/username, nomes das filas) |
-| `secret.yaml` | Secret | Dados sensíveis em base64 (RabbitMQ password) |
+| `secret.yaml` | Secret | Configuração sensível histórica; não é solução de zero credenciais fixas para a Fase 4 |
 
 As **readinessProbe** e **livenessProbe** do Deployment apontam para `/health` — o pod só recebe tráfego após o healthcheck passar.
 
@@ -135,7 +144,7 @@ FCG-NotificationsAPI/
 ├── services/
 │   └── NotificationsAPI/        # Projeto principal do serviço
 ├── tests/
-│   └── NotificationsAPI.Tests/  # Testes unitários (xUnit)
+│   └── NotificationsAPI.UnitTests/ # Testes unitários (xUnit)
 └── k8s/                         # Manifestos Kubernetes
     ├── deployment.yaml
     ├── service.yaml
